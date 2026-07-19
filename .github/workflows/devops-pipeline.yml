@@ -1,0 +1,49 @@
+name: Build and Deploy to AKS
+
+# 觸發條件：當有人把程式碼 Push 到 main 分支時，立刻自動啟動
+on:
+  push:
+    branches: 
+      - main
+
+jobs:
+  CI-CD-Pipeline:
+    runs-on: ubuntu-latest # 使用 GitHub 提供的乾淨微型伺服器來跑流水線
+    
+    steps:
+      # 1. 把專案原始碼下載到這台臨時伺服器
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # 2. 自動登入你的容器儲存庫 (以 Docker Hub 為例)
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      # 3. 【CI 階段】將修改後的投票前端 (vote) 打包成 Docker Image 並推上雲端
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./vote
+          push: true
+          tags: ${{ secrets.REGISTRY_USERNAME }}/vote:latest
+
+      # 4. 登入微軟 Azure 雲端機房
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # 5. 設定 kubectl 指向你的 AKS 叢集
+      - name: Set AKS Context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: 'DevOpsProject-JP'
+          cluster-name: 'VoteAppAKS-JP'
+
+      # 6. 【CD 階段】動態更新 AKS 叢集內的映像檔，觸發零中斷滾動式更新
+      - name: Deploy to AKS
+        run: |
+          kubectl set image deployment/vote vote=${{ secrets.REGISTRY_USERNAME }}/vote:latest
